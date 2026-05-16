@@ -45,6 +45,7 @@ import (
 
 	infrav1 "sigs.k8s.io/cluster-api-provider-aws/v2/api/v1beta2"
 	expinfrav1 "sigs.k8s.io/cluster-api-provider-aws/v2/exp/api/v1beta2"
+	expwebhooks "sigs.k8s.io/cluster-api-provider-aws/v2/exp/webhooks"
 	"sigs.k8s.io/cluster-api-provider-aws/v2/feature"
 	"sigs.k8s.io/cluster-api-provider-aws/v2/pkg/cloud"
 	"sigs.k8s.io/cluster-api-provider-aws/v2/pkg/cloud/scope"
@@ -773,7 +774,7 @@ func TestAWSMachinePoolReconciler(t *testing.T) {
 					nil,
 					nil)
 				ec2Svc.EXPECT().DiscoverLaunchTemplateAMI(gomock.Any(), gomock.Any()).Return(ptr.To[string]("ami-existing"), nil) // no change
-				ec2Svc.EXPECT().LaunchTemplateNeedsUpdate(gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil)
+				ec2Svc.EXPECT().LaunchTemplateNeedsUpdate(gomock.Any(), gomock.Any(), gomock.Any()).Return(false, services.LaunchTemplateNeedsUpdateReasonNone, nil)
 
 				asgSvc.EXPECT().GetASGByName(gomock.Any()).DoAndReturn(func(scope *scope.MachinePoolScope) (*expinfrav1.AutoScalingGroup, error) {
 					g.Expect(scope.Name()).To(Equal("test"))
@@ -822,7 +823,7 @@ func TestAWSMachinePoolReconciler(t *testing.T) {
 					nil,
 					nil)
 				ec2Svc.EXPECT().DiscoverLaunchTemplateAMI(gomock.Any(), gomock.Any()).Return(ptr.To[string]("ami-different"), nil)
-				ec2Svc.EXPECT().LaunchTemplateNeedsUpdate(gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil)
+				ec2Svc.EXPECT().LaunchTemplateNeedsUpdate(gomock.Any(), gomock.Any(), gomock.Any()).Return(false, services.LaunchTemplateNeedsUpdateReasonNone, nil)
 				asgSvc.EXPECT().CanStartASGInstanceRefresh(gomock.Any()).Return(true, nil, nil)
 				ec2Svc.EXPECT().PruneLaunchTemplateVersions(gomock.Any()).Return(nil, nil)
 				ec2Svc.EXPECT().CreateLaunchTemplateVersion(gomock.Any(), gomock.Any(), gomock.Eq(ptr.To[string]("ami-different")), gomock.Eq(apimachinerytypes.NamespacedName{Namespace: "default", Name: "bootstrap-data"}), gomock.Any(), gomock.Any()).Return(nil)
@@ -878,7 +879,7 @@ func TestAWSMachinePoolReconciler(t *testing.T) {
 					nil,
 					nil)
 				ec2Svc.EXPECT().DiscoverLaunchTemplateAMI(gomock.Any(), gomock.Any()).Return(ptr.To[string]("ami-existing"), nil)
-				ec2Svc.EXPECT().LaunchTemplateNeedsUpdate(gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil)
+				ec2Svc.EXPECT().LaunchTemplateNeedsUpdate(gomock.Any(), gomock.Any(), gomock.Any()).Return(false, services.LaunchTemplateNeedsUpdateReasonNone, nil)
 				asgSvc.EXPECT().CanStartASGInstanceRefresh(gomock.Any()).Return(true, nil, nil)
 				ec2Svc.EXPECT().PruneLaunchTemplateVersions(gomock.Any()).Return(nil, nil)
 				ec2Svc.EXPECT().CreateLaunchTemplateVersion(gomock.Any(), gomock.Any(), gomock.Eq(ptr.To[string]("ami-existing")), gomock.Eq(apimachinerytypes.NamespacedName{Namespace: "default", Name: "bootstrap-data"}), gomock.Any(), gomock.Any()).Return(nil)
@@ -970,7 +971,7 @@ func TestAWSMachinePoolReconciler(t *testing.T) {
 					nil,
 					nil)
 				ec2Svc.EXPECT().DiscoverLaunchTemplateAMI(gomock.Any(), gomock.Any()).Return(ptr.To[string]("ami-existing"), nil)
-				ec2Svc.EXPECT().LaunchTemplateNeedsUpdate(gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil)
+				ec2Svc.EXPECT().LaunchTemplateNeedsUpdate(gomock.Any(), gomock.Any(), gomock.Any()).Return(false, services.LaunchTemplateNeedsUpdateReasonNone, nil)
 				asgSvc.EXPECT().CanStartASGInstanceRefresh(gomock.Any()).Return(true, nil, nil)
 				ec2Svc.EXPECT().PruneLaunchTemplateVersions(gomock.Any()).Return(nil, nil)
 				ec2Svc.EXPECT().CreateLaunchTemplateVersion(gomock.Any(), gomock.Any(), gomock.Eq(ptr.To[string]("ami-existing")), gomock.Eq(apimachinerytypes.NamespacedName{Namespace: "default", Name: "bootstrap-data-new"}), gomock.Any(), gomock.Any()).Return(nil)
@@ -1025,7 +1026,7 @@ func TestAWSMachinePoolReconciler(t *testing.T) {
 					StorageType: infrav1.IgnitionStorageTypeOptionClusterObjectStore,
 				}
 				// simulate webhook that sets default ignition version
-				g.Expect((&expinfrav1.AWSMachinePoolWebhook{}).Default(context.TODO(), ms.AWSMachinePool)).To(BeNil())
+				g.Expect((&expwebhooks.AWSMachinePool{}).Default(context.TODO(), ms.AWSMachinePool)).To(BeNil())
 
 				asgSvc.EXPECT().GetASGByName(gomock.Any()).DoAndReturn(func(scope *scope.MachinePoolScope) (*expinfrav1.AutoScalingGroup, error) {
 					g.Expect(scope.Name()).To(Equal("test"))
@@ -1056,7 +1057,7 @@ func TestAWSMachinePoolReconciler(t *testing.T) {
 					nil,
 					nil)
 				ec2Svc.EXPECT().DiscoverLaunchTemplateAMI(gomock.Any(), gomock.Any()).Return(ptr.To[string]("ami-existing"), nil)
-				ec2Svc.EXPECT().LaunchTemplateNeedsUpdate(gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil)
+				ec2Svc.EXPECT().LaunchTemplateNeedsUpdate(gomock.Any(), gomock.Any(), gomock.Any()).Return(false, services.LaunchTemplateNeedsUpdateReasonNone, nil)
 
 				s3Mock.EXPECT().PutObject(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, input *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
 					g.Expect(*input.Key).To(Equal(fmt.Sprintf("machine-pool/test/%s", userdata.ComputeHash([]byte("shell-script")))))
@@ -1106,7 +1107,7 @@ func TestAWSMachinePoolReconciler(t *testing.T) {
 					nil,
 					nil)
 				ec2Svc.EXPECT().DiscoverLaunchTemplateAMI(gomock.Any(), gomock.Any()).Return(ptr.To[string]("ami-existing"), nil)
-				ec2Svc.EXPECT().LaunchTemplateNeedsUpdate(gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil)
+				ec2Svc.EXPECT().LaunchTemplateNeedsUpdate(gomock.Any(), gomock.Any(), gomock.Any()).Return(false, services.LaunchTemplateNeedsUpdateReasonNone, nil)
 
 				s3Mock.EXPECT().PutObject(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, input *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
 					g.Expect(*input.Key).To(Equal(fmt.Sprintf("machine-pool/test/%s", userdata.ComputeHash([]byte("shell-script")))))
@@ -1839,6 +1840,75 @@ func TestDiffASG(t *testing.T) {
 				g.Expect(diffASG(tt.args.machinePoolScope, tt.args.existingASG)).ToNot(BeEmpty())
 			} else {
 				g.Expect(diffASG(tt.args.machinePoolScope, tt.args.existingASG)).To(BeEmpty())
+			}
+		})
+	}
+}
+
+func TestValidateEnclaveEdgeZones(t *testing.T) {
+	zoneTypeAZ := infrav1.ZoneTypeAvailabilityZone
+	zoneTypeLocal := infrav1.ZoneTypeLocalZone
+	zoneTypeWavelength := infrav1.ZoneTypeWavelengthZone
+
+	tests := []struct {
+		name           string
+		enclaveOptions *infrav1.EnclaveOptions
+		subnetIDs      []string
+		azs            []string
+		clusterSubnets infrav1.Subnets
+		wantErr        bool
+	}{
+		{
+			name:           "enclaves disabled, edge-zone subnet present",
+			enclaveOptions: nil,
+			subnetIDs:      []string{"subnet-localzone"},
+			clusterSubnets: infrav1.Subnets{{ResourceID: "subnet-localzone", AvailabilityZone: "us-east-1-nyc-1a", ZoneType: &zoneTypeLocal}},
+			wantErr:        false,
+		},
+		{
+			name:           "enclaves enabled, standard AZ subnet by ID",
+			enclaveOptions: &infrav1.EnclaveOptions{Enabled: ptr.To(true)},
+			subnetIDs:      []string{"subnet-standard"},
+			clusterSubnets: infrav1.Subnets{{ResourceID: "subnet-standard", AvailabilityZone: "us-east-1a", ZoneType: &zoneTypeAZ}},
+			wantErr:        false,
+		},
+		{
+			name:           "enclaves enabled, local-zone subnet by ID",
+			enclaveOptions: &infrav1.EnclaveOptions{Enabled: ptr.To(true)},
+			subnetIDs:      []string{"subnet-localzone"},
+			clusterSubnets: infrav1.Subnets{{ResourceID: "subnet-localzone", AvailabilityZone: "us-east-1-nyc-1a", ZoneType: &zoneTypeLocal}},
+			wantErr:        true,
+		},
+		{
+			name:           "enclaves enabled, wavelength-zone subnet by ID",
+			enclaveOptions: &infrav1.EnclaveOptions{Enabled: ptr.To(true)},
+			subnetIDs:      []string{"subnet-wlz"},
+			clusterSubnets: infrav1.Subnets{{ResourceID: "subnet-wlz", AvailabilityZone: "us-east-1-wl1-bos-wlz-1", ZoneType: &zoneTypeWavelength}},
+			wantErr:        true,
+		},
+		{
+			name:           "enclaves enabled, local-zone by AZ name",
+			enclaveOptions: &infrav1.EnclaveOptions{Enabled: ptr.To(true)},
+			azs:            []string{"us-east-1-nyc-1a"},
+			clusterSubnets: infrav1.Subnets{{ResourceID: "subnet-localzone", AvailabilityZone: "us-east-1-nyc-1a", ZoneType: &zoneTypeLocal}},
+			wantErr:        true,
+		},
+		{
+			name:           "enclaves enabled, no explicit subnets or AZs",
+			enclaveOptions: &infrav1.EnclaveOptions{Enabled: ptr.To(true)},
+			clusterSubnets: infrav1.Subnets{{ResourceID: "subnet-standard", AvailabilityZone: "us-east-1a", ZoneType: &zoneTypeAZ}},
+			wantErr:        false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			err := validateEnclaveEdgeZones(tt.enclaveOptions, tt.clusterSubnets, tt.subnetIDs, tt.azs)
+			if tt.wantErr {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
 			}
 		})
 	}

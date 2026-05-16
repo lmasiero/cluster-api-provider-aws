@@ -155,6 +155,20 @@ func (mr *MockOCMClientMockRecorder) DeleteCluster(arg0, arg1, arg2 interface{})
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteCluster", reflect.TypeOf((*MockOCMClient)(nil).DeleteCluster), arg0, arg1, arg2)
 }
 
+// DeleteLogForwarder mocks base method.
+func (m *MockOCMClient) DeleteLogForwarder(arg0, arg1 string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteLogForwarder", arg0, arg1)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteLogForwarder indicates an expected call of DeleteLogForwarder.
+func (mr *MockOCMClientMockRecorder) DeleteLogForwarder(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteLogForwarder", reflect.TypeOf((*MockOCMClient)(nil).DeleteLogForwarder), arg0, arg1)
+}
+
 // DeleteNodePool mocks base method.
 func (m *MockOCMClient) DeleteNodePool(arg0, arg1 string) error {
 	m.ctrl.T.Helper()
@@ -181,6 +195,21 @@ func (m *MockOCMClient) DeleteUser(arg0, arg1, arg2 string) error {
 func (mr *MockOCMClientMockRecorder) DeleteUser(arg0, arg1, arg2 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteUser", reflect.TypeOf((*MockOCMClient)(nil).DeleteUser), arg0, arg1, arg2)
+}
+
+// GetAvailableChannels mocks base method.
+func (m *MockOCMClient) GetAvailableChannels(arg0 string) ([]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetAvailableChannels", arg0)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetAvailableChannels indicates an expected call of GetAvailableChannels.
+func (mr *MockOCMClientMockRecorder) GetAvailableChannels(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAvailableChannels", reflect.TypeOf((*MockOCMClient)(nil).GetAvailableChannels), arg0)
 }
 
 // GetCluster mocks base method.
@@ -257,6 +286,21 @@ func (m *MockOCMClient) GetIdentityProviders(arg0 string) ([]*v1.IdentityProvide
 func (mr *MockOCMClientMockRecorder) GetIdentityProviders(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetIdentityProviders", reflect.TypeOf((*MockOCMClient)(nil).GetIdentityProviders), arg0)
+}
+
+// GetLogForwarders mocks base method.
+func (m *MockOCMClient) GetLogForwarders(arg0 string) ([]*v1.LogForwarder, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetLogForwarders", arg0)
+	ret0, _ := ret[0].([]*v1.LogForwarder)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetLogForwarders indicates an expected call of GetLogForwarders.
+func (mr *MockOCMClientMockRecorder) GetLogForwarders(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLogForwarders", reflect.TypeOf((*MockOCMClient)(nil).GetLogForwarders), arg0)
 }
 
 // GetMissingGateAgreementsHypershift mocks base method.
@@ -365,6 +409,21 @@ func (mr *MockOCMClientMockRecorder) ScheduleNodePoolUpgrade(arg0, arg1, arg2 in
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ScheduleNodePoolUpgrade", reflect.TypeOf((*MockOCMClient)(nil).ScheduleNodePoolUpgrade), arg0, arg1, arg2)
 }
 
+// SetLogForwarder mocks base method.
+func (m *MockOCMClient) SetLogForwarder(arg0 string, arg1 *v1.LogForwarder) (*v1.LogForwarder, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SetLogForwarder", arg0, arg1)
+	ret0, _ := ret[0].(*v1.LogForwarder)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SetLogForwarder indicates an expected call of SetLogForwarder.
+func (mr *MockOCMClientMockRecorder) SetLogForwarder(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetLogForwarder", reflect.TypeOf((*MockOCMClient)(nil).SetLogForwarder), arg0, arg1)
+}
+
 // UpdateCluster mocks base method.
 func (m *MockOCMClient) UpdateCluster(arg0 string, arg1 *aws.Creator, arg2 ocm.Spec) error {
 	m.ctrl.T.Helper()
@@ -377,6 +436,20 @@ func (m *MockOCMClient) UpdateCluster(arg0 string, arg1 *aws.Creator, arg2 ocm.S
 func (mr *MockOCMClientMockRecorder) UpdateCluster(arg0, arg1, arg2 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateCluster", reflect.TypeOf((*MockOCMClient)(nil).UpdateCluster), arg0, arg1, arg2)
+}
+
+// UpdateLogForwarder mocks base method.
+func (m *MockOCMClient) UpdateLogForwarder(arg0 *v1.LogForwarder, arg1, arg2 string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateLogForwarder", arg0, arg1, arg2)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateLogForwarder indicates an expected call of UpdateLogForwarder.
+func (mr *MockOCMClientMockRecorder) UpdateLogForwarder(arg0, arg1, arg2 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateLogForwarder", reflect.TypeOf((*MockOCMClient)(nil).UpdateLogForwarder), arg0, arg1, arg2)
 }
 
 // UpdateNodePool mocks base method.

@@ -5905,6 +5905,132 @@ func TestCreateInstance(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "with nested virtualization enabled",
+			machine: &clusterv1.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"set": "node"},
+				},
+				Spec: clusterv1.MachineSpec{
+					Bootstrap: clusterv1.Bootstrap{
+						DataSecretName: ptr.To[string]("bootstrap-data"),
+					},
+				},
+			},
+			machineConfig: &infrav1.AWSMachineSpec{
+				AMI: infrav1.AMIReference{
+					ID: aws.String("abc"),
+				},
+				InstanceType: "m8i.large",
+				CPUOptions: infrav1.CPUOptions{
+					NestedVirtualization: infrav1.NestedVirtualizationPolicyEnabled,
+				},
+			},
+			awsCluster: &infrav1.AWSCluster{
+				ObjectMeta: metav1.ObjectMeta{Name: "test"},
+				Spec: infrav1.AWSClusterSpec{
+					NetworkSpec: infrav1.NetworkSpec{
+						Subnets: infrav1.Subnets{
+							infrav1.SubnetSpec{
+								ID:       "subnet-1",
+								IsPublic: false,
+							},
+							infrav1.SubnetSpec{
+								IsPublic: false,
+							},
+						},
+						VPC: infrav1.VPCSpec{
+							ID: "vpc-test",
+						},
+					},
+				},
+				Status: infrav1.AWSClusterStatus{
+					Network: infrav1.NetworkStatus{
+						SecurityGroups: map[infrav1.SecurityGroupRole]infrav1.SecurityGroup{
+							infrav1.SecurityGroupControlPlane: {
+								ID: "1",
+							},
+							infrav1.SecurityGroupNode: {
+								ID: "2",
+							},
+							infrav1.SecurityGroupLB: {
+								ID: "3",
+							},
+						},
+						APIServerELB: infrav1.LoadBalancer{
+							DNSName: "test-apiserver.us-east-1.aws",
+						},
+					},
+				},
+			},
+			expect: func(m *mocks.MockEC2APIMockRecorder) {
+				m.
+					DescribeInstanceTypes(context.TODO(), gomock.Eq(&ec2.DescribeInstanceTypesInput{
+						InstanceTypes: []types.InstanceType{
+							types.InstanceTypeM8iLarge,
+						},
+					})).
+					Return(&ec2.DescribeInstanceTypesOutput{
+						InstanceTypes: []types.InstanceTypeInfo{
+							{
+								ProcessorInfo: &types.ProcessorInfo{
+									SupportedArchitectures: []types.ArchitectureType{
+										types.ArchitectureTypeX8664,
+									},
+								},
+							},
+						},
+					}, nil)
+				m.
+					RunInstances(context.TODO(), gomock.Any()).
+					DoAndReturn(func(ctx context.Context, input *ec2.RunInstancesInput, optFns ...func(*ec2.Options)) (*ec2.RunInstancesOutput, error) {
+						if input.CpuOptions == nil {
+							t.Fatalf("expected nested virtualization to be enabled, but got no CpuOptions")
+						} else if input.CpuOptions.NestedVirtualization != types.NestedVirtualizationSpecificationEnabled {
+							t.Fatalf("expected nested virtualization to be enabled, but got %s", input.CpuOptions.NestedVirtualization)
+						}
+						return &ec2.RunInstancesOutput{
+							Instances: []types.Instance{
+								{
+									State: &types.InstanceState{
+										Name: types.InstanceStateNamePending,
+									},
+									IamInstanceProfile: &types.IamInstanceProfile{
+										Arn: aws.String("arn:aws:iam::123456789012:instance-profile/foo"),
+									},
+									InstanceId:     aws.String("two"),
+									InstanceType:   types.InstanceTypeM8iLarge,
+									SubnetId:       aws.String("subnet-1"),
+									ImageId:        aws.String("ami-1"),
+									RootDeviceName: aws.String("device-1"),
+									BlockDeviceMappings: []types.InstanceBlockDeviceMapping{
+										{
+											DeviceName: aws.String("device-1"),
+											Ebs: &types.EbsInstanceBlockDevice{
+												VolumeId: aws.String("volume-1"),
+											},
+										},
+									},
+									Placement: &types.Placement{
+										AvailabilityZone: &az,
+									},
+								},
+							},
+						}, nil
+					})
+				m.
+					DescribeNetworkInterfaces(context.TODO(), gomock.Any()).
+					Return(&ec2.DescribeNetworkInterfacesOutput{
+						NetworkInterfaces: []types.NetworkInterface{},
+						NextToken:         nil,
+					}, nil)
+			},
+			check: func(instance *infrav1.Instance, err error) {
+				if err != nil {
+					t.Fatalf("did not expect error: %v", err)
+				}
+			},
+		},
 	}
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -5971,7 +6097,7 @@ func TestCreateInstance(t *testing.T) {
 			machineScope.AWSMachine.Spec = *tc.machineConfig
 			tc.expect(ec2Mock.EXPECT())
 
-			s := NewService(clusterScope)
+			s := NewService(clusterScope).WithInstanceTypeArchitectureCache(nil)
 			s.EC2Client = ec2Mock
 
 			instance, err := s.CreateInstance(context.TODO(), machineScope, data, "")
@@ -6413,6 +6539,203 @@ func TestGetDHCPOptionSetDomainName(t *testing.T) {
 	}
 }
 
+func TestGetInstanceAddresses(t *testing.T) {
+	testCases := []struct {
+		name              string
+		networkInterfaces []types.InstanceNetworkInterface
+		expectedAddresses []clusterv1beta1.MachineAddress
+	}{
+		{
+			name: "IPv4 only instance returns IPv4 internal and external addresses",
+			networkInterfaces: []types.InstanceNetworkInterface{
+				{
+					PrivateDnsName:   aws.String("ip-10-0-1-5.us-west-2.compute.internal"),
+					PrivateIpAddress: aws.String("10.0.1.5"),
+					Association: &types.InstanceNetworkInterfaceAssociation{
+						PublicDnsName: aws.String("ec2-1-2-3-4.us-west-2.compute.amazonaws.com"),
+						PublicIp:      aws.String("1.2.3.4"),
+					},
+				},
+			},
+			expectedAddresses: []clusterv1beta1.MachineAddress{
+				{Type: clusterv1beta1.MachineInternalDNS, Address: "ip-10-0-1-5.us-west-2.compute.internal"},
+				{Type: clusterv1beta1.MachineInternalIP, Address: "10.0.1.5"},
+				{Type: clusterv1beta1.MachineExternalDNS, Address: "ec2-1-2-3-4.us-west-2.compute.amazonaws.com"},
+				{Type: clusterv1beta1.MachineExternalIP, Address: "1.2.3.4"},
+			},
+		},
+		{
+			name: "IPv6-only instance returns IPv6 address as InternalIP",
+			networkInterfaces: []types.InstanceNetworkInterface{
+				{
+					Ipv6Addresses: []types.InstanceIpv6Address{
+						{Ipv6Address: aws.String("2600:1f13:abc:de00::1")},
+					},
+				},
+			},
+			expectedAddresses: []clusterv1beta1.MachineAddress{
+				{Type: clusterv1beta1.MachineInternalIP, Address: "2600:1f13:abc:de00::1"},
+			},
+		},
+		{
+			name: "dual-stack instance returns both IPv4 and IPv6 addresses",
+			networkInterfaces: []types.InstanceNetworkInterface{
+				{
+					PrivateDnsName:   aws.String("ip-10-0-1-5.us-west-2.compute.internal"),
+					PrivateIpAddress: aws.String("10.0.1.5"),
+					Ipv6Addresses: []types.InstanceIpv6Address{
+						{Ipv6Address: aws.String("2600:1f13:abc:de00::1")},
+					},
+				},
+			},
+			expectedAddresses: []clusterv1beta1.MachineAddress{
+				{Type: clusterv1beta1.MachineInternalDNS, Address: "ip-10-0-1-5.us-west-2.compute.internal"},
+				{Type: clusterv1beta1.MachineInternalIP, Address: "10.0.1.5"},
+				{Type: clusterv1beta1.MachineInternalIP, Address: "2600:1f13:abc:de00::1"},
+			},
+		},
+		{
+			name: "multiple IPv6 addresses in the same ENI are all included",
+			networkInterfaces: []types.InstanceNetworkInterface{
+				{
+					Ipv6Addresses: []types.InstanceIpv6Address{
+						{Ipv6Address: aws.String("2600:1f13:abc:de00::1")},
+						{Ipv6Address: aws.String("2600:1f13:abc:de00::2")},
+					},
+				},
+			},
+			expectedAddresses: []clusterv1beta1.MachineAddress{
+				{Type: clusterv1beta1.MachineInternalIP, Address: "2600:1f13:abc:de00::1"},
+				{Type: clusterv1beta1.MachineInternalIP, Address: "2600:1f13:abc:de00::2"},
+			},
+		},
+		{
+			name: "link-local unicast IPv6 address is skipped",
+			networkInterfaces: []types.InstanceNetworkInterface{
+				{
+					PrivateIpAddress: aws.String("10.0.1.5"),
+					Ipv6Addresses: []types.InstanceIpv6Address{
+						{Ipv6Address: aws.String("fe80::1")},
+					},
+				},
+			},
+			expectedAddresses: []clusterv1beta1.MachineAddress{
+				{Type: clusterv1beta1.MachineInternalIP, Address: "10.0.1.5"},
+			},
+		},
+		{
+			name: "invalid IPv6 address is skipped",
+			networkInterfaces: []types.InstanceNetworkInterface{
+				{
+					PrivateIpAddress: aws.String("10.0.1.5"),
+					Ipv6Addresses: []types.InstanceIpv6Address{
+						{Ipv6Address: aws.String("not-an-ip")},
+					},
+				},
+			},
+			expectedAddresses: []clusterv1beta1.MachineAddress{
+				{Type: clusterv1beta1.MachineInternalIP, Address: "10.0.1.5"},
+			},
+		},
+		{
+			name: "only link-local IPv6 address present yields no IPv6 entry",
+			networkInterfaces: []types.InstanceNetworkInterface{
+				{
+					Ipv6Addresses: []types.InstanceIpv6Address{
+						{Ipv6Address: aws.String("fe80::abcd:ef01")},
+					},
+				},
+			},
+			expectedAddresses: []clusterv1beta1.MachineAddress{},
+		},
+		{
+			name: "mix of link-local and global IPv6 addresses: only global is included",
+			networkInterfaces: []types.InstanceNetworkInterface{
+				{
+					Ipv6Addresses: []types.InstanceIpv6Address{
+						{Ipv6Address: aws.String("fe80::1")},
+						{Ipv6Address: aws.String("2600:1f13:abc:de00::1")},
+					},
+				},
+			},
+			expectedAddresses: []clusterv1beta1.MachineAddress{
+				{Type: clusterv1beta1.MachineInternalIP, Address: "2600:1f13:abc:de00::1"},
+			},
+		},
+		{
+			name: "empty IPv6 address in ENI is skipped",
+			networkInterfaces: []types.InstanceNetworkInterface{
+				{
+					PrivateIpAddress: aws.String("10.0.1.5"),
+					Ipv6Addresses: []types.InstanceIpv6Address{
+						{Ipv6Address: aws.String("")},
+					},
+				},
+			},
+			expectedAddresses: []clusterv1beta1.MachineAddress{
+				{Type: clusterv1beta1.MachineInternalIP, Address: "10.0.1.5"},
+			},
+		},
+		{
+			name: "multiple ENIs with IPv6 addresses",
+			networkInterfaces: []types.InstanceNetworkInterface{
+				{
+					PrivateDnsName:   aws.String("ip-10-0-1-5.us-west-2.compute.internal"),
+					PrivateIpAddress: aws.String("10.0.1.5"),
+					Ipv6Addresses: []types.InstanceIpv6Address{
+						{Ipv6Address: aws.String("2600:1f13:abc:de00::1")},
+					},
+				},
+				{
+					PrivateDnsName:   aws.String("ip-10-0-2-5.us-west-2.compute.internal"),
+					PrivateIpAddress: aws.String("10.0.2.5"),
+					Ipv6Addresses: []types.InstanceIpv6Address{
+						{Ipv6Address: aws.String("2600:1f13:abc:de00::2")},
+					},
+				},
+			},
+			expectedAddresses: []clusterv1beta1.MachineAddress{
+				{Type: clusterv1beta1.MachineInternalDNS, Address: "ip-10-0-1-5.us-west-2.compute.internal"},
+				{Type: clusterv1beta1.MachineInternalIP, Address: "10.0.1.5"},
+				{Type: clusterv1beta1.MachineInternalIP, Address: "2600:1f13:abc:de00::1"},
+				{Type: clusterv1beta1.MachineInternalDNS, Address: "ip-10-0-2-5.us-west-2.compute.internal"},
+				{Type: clusterv1beta1.MachineInternalIP, Address: "10.0.2.5"},
+				{Type: clusterv1beta1.MachineInternalIP, Address: "2600:1f13:abc:de00::2"},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := NewWithT(t)
+			mockCtrl := gomock.NewController(t)
+			defer mockCtrl.Finish()
+			ec2Mock := mocks.NewMockEC2API(mockCtrl)
+			scheme, err := setupScheme()
+			g.Expect(err).ToNot(HaveOccurred())
+
+			client := fake.NewClientBuilder().WithScheme(scheme).Build()
+			cs, err := scope.NewClusterScope(scope.ClusterScopeParams{
+				Client:  client,
+				Cluster: &clusterv1.Cluster{},
+				AWSCluster: &infrav1.AWSCluster{
+					ObjectMeta: metav1.ObjectMeta{Name: "test"},
+				},
+			})
+			g.Expect(err).ToNot(HaveOccurred())
+
+			ec2Svc := NewService(cs)
+			ec2Svc.EC2Client = ec2Mock
+
+			instance := types.Instance{
+				NetworkInterfaces: tc.networkInterfaces,
+			}
+			addresses := ec2Svc.getInstanceAddresses(instance)
+			g.Expect(addresses).To(ConsistOf(tc.expectedAddresses))
+		})
+	}
+}
+
 func mockedGetPrivateDNSDomainNameFromDHCPOptionsCalls(m *mocks.MockEC2APIMockRecorder) {
 	m.DescribeVpcs(context.TODO(), &ec2.DescribeVpcsInput{
 		VpcIds: []string{"vpc-exists"},
@@ -6579,6 +6902,35 @@ func TestGetInstanceCPUOptionsRequest(t *testing.T) {
 				ConfidentialCompute: "",
 			},
 			expectedRequest: nil,
+		},
+		{
+			name: "with NestedVirtualization enabled",
+			cpuOptions: infrav1.CPUOptions{
+				NestedVirtualization: infrav1.NestedVirtualizationPolicyEnabled,
+			},
+			expectedRequest: &types.CpuOptionsRequest{
+				NestedVirtualization: types.NestedVirtualizationSpecificationEnabled,
+			},
+		},
+		{
+			name: "with NestedVirtualization disabled",
+			cpuOptions: infrav1.CPUOptions{
+				NestedVirtualization: infrav1.NestedVirtualizationPolicyDisabled,
+			},
+			expectedRequest: &types.CpuOptionsRequest{
+				NestedVirtualization: types.NestedVirtualizationSpecificationDisabled,
+			},
+		},
+		{
+			name: "with both ConfidentialCompute and NestedVirtualization set",
+			cpuOptions: infrav1.CPUOptions{
+				ConfidentialCompute:  infrav1.AWSConfidentialComputePolicySEVSNP,
+				NestedVirtualization: infrav1.NestedVirtualizationPolicyEnabled,
+			},
+			expectedRequest: &types.CpuOptionsRequest{
+				AmdSevSnp:            types.AmdSevSnpSpecificationEnabled,
+				NestedVirtualization: types.NestedVirtualizationSpecificationEnabled,
+			},
 		},
 	}
 

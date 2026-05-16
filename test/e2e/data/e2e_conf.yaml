@@ -168,6 +168,7 @@ providers:
           - sourcePath: "./infrastructure-aws/withoutclusterclass/generated/cluster-template-ignition.yaml"
           - sourcePath: "./infrastructure-aws/withoutclusterclass/generated/cluster-template-upgrade-to-external-cloud-provider.yaml"
           - sourcePath: "./infrastructure-aws/withoutclusterclass/generated/cluster-template-dedicated-host.yaml"
+          - sourcePath: "./infrastructure-aws/withoutclusterclass/generated/cluster-template-nitro-enclave.yaml"
         replacements:
           # To allow bugs to be catched.
           - old: "failureThreshold: 3"
@@ -190,6 +191,7 @@ variables:
   KUBERNETES_VERSION: "v1.32.0"
   KUBERNETES_VERSION_UPGRADE_TO: "v1.32.0"
   KUBERNETES_VERSION_UPGRADE_FROM: "v1.31.0"
+  KUBERNETES_AWS_CCM_VERSION: "v1.32.5"
   CNI: "../../data/cni/calico.yaml"
   KUBETEST_CONFIGURATION: "../../data/kubetest/conformance.yaml"
   EVENT_BRIDGE_INSTANCE_STATE: "true"
@@ -234,7 +236,6 @@ intervals:
   default/wait-machine-status: ["25m", "10s"]
   default/wait-failed-machine-status: ["2m", "10s"]
   default/wait-infra-subnets: ["5m", "30s"]
-  default/wait-machine-pool-nodes: ["40m", "10s"]
   default/wait-machine-pool-upgrade: ["50m", "10s"]
   default/wait-create-identity: ["1m", "10s"]
   default/wait-job: ["10m", "10s"]

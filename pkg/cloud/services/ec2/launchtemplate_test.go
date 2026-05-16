@@ -40,6 +40,7 @@ import (
 	expinfrav1 "sigs.k8s.io/cluster-api-provider-aws/v2/exp/api/v1beta2"
 	"sigs.k8s.io/cluster-api-provider-aws/v2/pkg/cloud/awserrors"
 	"sigs.k8s.io/cluster-api-provider-aws/v2/pkg/cloud/scope"
+	"sigs.k8s.io/cluster-api-provider-aws/v2/pkg/cloud/services"
 	"sigs.k8s.io/cluster-api-provider-aws/v2/pkg/cloud/services/ssm/mock_ssmiface"
 	"sigs.k8s.io/cluster-api-provider-aws/v2/pkg/cloud/services/userdata"
 	"sigs.k8s.io/cluster-api-provider-aws/v2/test/mocks"
@@ -560,6 +561,35 @@ func TestServiceSDKToLaunchTemplate(t *testing.T) {
 			wantDataSecretKey:     &types.NamespacedName{Namespace: "bootstrap-secret-ns", Name: "bootstrap-secret"},
 			wantBootstrapDataHash: &testBootstrapDataHash,
 		},
+		{
+			name: "enclave options enabled",
+			input: ec2types.LaunchTemplateVersion{
+				LaunchTemplateId:   aws.String("lt-12345"),
+				LaunchTemplateName: aws.String("foo"),
+				LaunchTemplateData: &ec2types.ResponseLaunchTemplateData{
+					ImageId: aws.String("foo-image"),
+					IamInstanceProfile: &ec2types.LaunchTemplateIamInstanceProfileSpecification{
+						Arn: aws.String("instance-profile/foo-profile"),
+					},
+					KeyName:        aws.String("foo-keyname"),
+					UserData:       aws.String(base64.StdEncoding.EncodeToString([]byte(testUserData))),
+					EnclaveOptions: &ec2types.LaunchTemplateEnclaveOptions{Enabled: aws.Bool(true)},
+				},
+				VersionNumber: aws.Int64(1),
+			},
+			wantLT: &expinfrav1.AWSLaunchTemplate{
+				Name: "foo",
+				AMI: infrav1.AMIReference{
+					ID: aws.String("foo-image"),
+				},
+				IamInstanceProfile: "foo-profile",
+				SSHKeyName:         aws.String("foo-keyname"),
+				VersionNumber:      aws.Int64(1),
+				EnclaveOptions:     &infrav1.EnclaveOptions{Enabled: aws.Bool(true)},
+			},
+			wantUserDataHash:  testUserDataHash,
+			wantDataSecretKey: nil,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -588,12 +618,13 @@ func TestServiceLaunchTemplateNeedsUpdate(t *testing.T) {
 	defer mockCtrl.Finish()
 
 	tests := []struct {
-		name     string
-		incoming *expinfrav1.AWSLaunchTemplate
-		existing *expinfrav1.AWSLaunchTemplate
-		expect   func(m *mocks.MockEC2APIMockRecorder)
-		want     bool
-		wantErr  bool
+		name                  string
+		incoming              *expinfrav1.AWSLaunchTemplate
+		existing              *expinfrav1.AWSLaunchTemplate
+		expect                func(m *mocks.MockEC2APIMockRecorder)
+		want                  bool
+		wantNeedsUpdateReason services.LaunchTemplateNeedsUpdateReason
+		wantErr               bool
 	}{
 		{
 			name: "only core security groups, order shouldn't matter",
@@ -639,8 +670,9 @@ func TestServiceLaunchTemplateNeedsUpdate(t *testing.T) {
 					{ID: aws.String("sg-999")},
 				},
 			},
-			want:    true,
-			wantErr: false,
+			want:                  true,
+			wantNeedsUpdateReason: services.LaunchTemplateNeedsUpdateReasonAdditionalSecurityGroupIDs,
+			wantErr:               false,
 		},
 		{
 			name: "new additional security group",
@@ -657,8 +689,9 @@ func TestServiceLaunchTemplateNeedsUpdate(t *testing.T) {
 					{ID: aws.String("sg-999")},
 				},
 			},
-			want:    true,
-			wantErr: false,
+			want:                  true,
+			wantNeedsUpdateReason: services.LaunchTemplateNeedsUpdateReasonAdditionalSecurityGroupIDs,
+			wantErr:               false,
 		},
 		{
 			name: "Should return true if incoming IamInstanceProfile is not same as existing IamInstanceProfile",
@@ -672,7 +705,8 @@ func TestServiceLaunchTemplateNeedsUpdate(t *testing.T) {
 				},
 				IamInstanceProfile: "some-other-profile",
 			},
-			want: true,
+			want:                  true,
+			wantNeedsUpdateReason: services.LaunchTemplateNeedsUpdateReasonIamInstanceProfile,
 		},
 		{
 			name: "Should return true if incoming InstanceType is not same as existing InstanceType",
@@ -686,7 +720,8 @@ func TestServiceLaunchTemplateNeedsUpdate(t *testing.T) {
 				},
 				InstanceType: "t3.large",
 			},
-			want: true,
+			want:                  true,
+			wantNeedsUpdateReason: services.LaunchTemplateNeedsUpdateReasonInstanceType,
 		},
 		{
 			name: "new additional security group with filters",
@@ -706,8 +741,9 @@ func TestServiceLaunchTemplateNeedsUpdate(t *testing.T) {
 				m.DescribeSecurityGroups(context.TODO(), gomock.Eq(&ec2.DescribeSecurityGroupsInput{Filters: []ec2types.Filter{{Name: aws.String("sg-2"), Values: []string{"test-2"}}}})).
 					Return(&ec2.DescribeSecurityGroupsOutput{SecurityGroups: []ec2types.SecurityGroup{{GroupId: aws.String("sg-2")}}}, nil)
 			},
-			want:    true,
-			wantErr: false,
+			want:                  true,
+			wantNeedsUpdateReason: services.LaunchTemplateNeedsUpdateReasonAdditionalSecurityGroupIDs,
+			wantErr:               false,
 		},
 		{
 			name: "new launch template instance metadata options, requiring IMDSv2",
@@ -723,8 +759,9 @@ func TestServiceLaunchTemplateNeedsUpdate(t *testing.T) {
 					{ID: aws.String("sg-222")},
 				},
 			},
-			want:    true,
-			wantErr: false,
+			want:                  true,
+			wantNeedsUpdateReason: services.LaunchTemplateNeedsUpdateReasonInstanceMetadataOptions,
+			wantErr:               false,
 		},
 		{
 			name:     "new launch template instance metadata options, removing IMDSv2 requirement",
@@ -735,8 +772,29 @@ func TestServiceLaunchTemplateNeedsUpdate(t *testing.T) {
 					HTTPTokens:              infrav1.HTTPTokensStateRequired,
 				},
 			},
-			want:    true,
-			wantErr: false,
+			want:                  true,
+			wantNeedsUpdateReason: services.LaunchTemplateNeedsUpdateReasonInstanceMetadataOptions,
+			wantErr:               false,
+		},
+		{
+			name: "new enclave options, enabling Nitro Enclaves",
+			incoming: &expinfrav1.AWSLaunchTemplate{
+				EnclaveOptions: &infrav1.EnclaveOptions{Enabled: aws.Bool(true)},
+			},
+			existing:              &expinfrav1.AWSLaunchTemplate{},
+			want:                  true,
+			wantNeedsUpdateReason: services.LaunchTemplateNeedsUpdateReasonEnclaveOptions,
+			wantErr:               false,
+		},
+		{
+			name:     "removing enclave options",
+			incoming: &expinfrav1.AWSLaunchTemplate{},
+			existing: &expinfrav1.AWSLaunchTemplate{
+				EnclaveOptions: &infrav1.EnclaveOptions{Enabled: aws.Bool(true)},
+			},
+			want:                  true,
+			wantNeedsUpdateReason: services.LaunchTemplateNeedsUpdateReasonEnclaveOptions,
+			wantErr:               false,
 		},
 		{
 			name: "Should return true if incoming SpotMarketOptions is different from existing SpotMarketOptions",
@@ -754,8 +812,9 @@ func TestServiceLaunchTemplateNeedsUpdate(t *testing.T) {
 					MaxPrice: aws.String("0.05"),
 				},
 			},
-			want:    true,
-			wantErr: false,
+			want:                  true,
+			wantNeedsUpdateReason: services.LaunchTemplateNeedsUpdateReasonSpotMarketOptions,
+			wantErr:               false,
 		},
 		{
 			name: "Should return true if incoming adds SpotMarketOptions and existing has none",
@@ -771,8 +830,9 @@ func TestServiceLaunchTemplateNeedsUpdate(t *testing.T) {
 				},
 				SpotMarketOptions: nil,
 			},
-			want:    true,
-			wantErr: false,
+			want:                  true,
+			wantNeedsUpdateReason: services.LaunchTemplateNeedsUpdateReasonSpotMarketOptions,
+			wantErr:               false,
 		},
 		{
 			name: "Should return true if incoming removes SpotMarketOptions and existing has some",
@@ -788,8 +848,9 @@ func TestServiceLaunchTemplateNeedsUpdate(t *testing.T) {
 					MaxPrice: aws.String("0.05"),
 				},
 			},
-			want:    true,
-			wantErr: false,
+			want:                  true,
+			wantNeedsUpdateReason: services.LaunchTemplateNeedsUpdateReasonSpotMarketOptions,
+			wantErr:               false,
 		},
 		{
 			name: "Should return true if SSH key names are different",
@@ -803,8 +864,9 @@ func TestServiceLaunchTemplateNeedsUpdate(t *testing.T) {
 				},
 				SSHKeyName: aws.String("old-key"),
 			},
-			want:    true,
-			wantErr: false,
+			want:                  true,
+			wantNeedsUpdateReason: services.LaunchTemplateNeedsUpdateReasonSSHKeyName,
+			wantErr:               false,
 		},
 		{
 			name: "Should return true if one has SSH key name and other doesn't",
@@ -818,8 +880,25 @@ func TestServiceLaunchTemplateNeedsUpdate(t *testing.T) {
 				},
 				SSHKeyName: nil,
 			},
-			want:    true,
-			wantErr: false,
+			want:                  true,
+			wantNeedsUpdateReason: services.LaunchTemplateNeedsUpdateReasonSSHKeyName,
+			wantErr:               false,
+		},
+		{
+			name: "Should return false if no SSH key is set in the spec and AWS returns no key pair as well",
+			incoming: &expinfrav1.AWSLaunchTemplate{
+				SSHKeyName: aws.String(""), // explicit empty string
+			},
+			existing: &expinfrav1.AWSLaunchTemplate{
+				AdditionalSecurityGroups: []infrav1.AWSResourceReference{
+					{ID: aws.String("sg-111")},
+					{ID: aws.String("sg-222")},
+				},
+				SSHKeyName: nil,
+			},
+			want:                  false,
+			wantNeedsUpdateReason: "",
+			wantErr:               false,
 		},
 		{
 			name: "Should return true if incoming PrivateDNSName is different from existing PrivateDNSName",
@@ -841,8 +920,9 @@ func TestServiceLaunchTemplateNeedsUpdate(t *testing.T) {
 					HostnameType:                    aws.String("ip-name"),
 				},
 			},
-			want:    true,
-			wantErr: false,
+			want:                  true,
+			wantNeedsUpdateReason: services.LaunchTemplateNeedsUpdateReasonPrivateDNSName,
+			wantErr:               false,
 		},
 		{
 			name: "Should return true if incoming adds PrivateDNSName and existing has none",
@@ -860,8 +940,9 @@ func TestServiceLaunchTemplateNeedsUpdate(t *testing.T) {
 				},
 				PrivateDNSName: nil,
 			},
-			want:    true,
-			wantErr: false,
+			want:                  true,
+			wantNeedsUpdateReason: services.LaunchTemplateNeedsUpdateReasonPrivateDNSName,
+			wantErr:               false,
 		},
 		{
 			name: "Should return true if incoming removes PrivateDNSName and existing has some",
@@ -879,8 +960,9 @@ func TestServiceLaunchTemplateNeedsUpdate(t *testing.T) {
 					HostnameType:                    aws.String("resource-name"),
 				},
 			},
-			want:    true,
-			wantErr: false,
+			want:                  true,
+			wantNeedsUpdateReason: services.LaunchTemplateNeedsUpdateReasonPrivateDNSName,
+			wantErr:               false,
 		},
 		{
 			name: "Should return true if capacity reservation IDs are different",
@@ -894,8 +976,9 @@ func TestServiceLaunchTemplateNeedsUpdate(t *testing.T) {
 				},
 				CapacityReservationID: aws.String("old-reservation"),
 			},
-			want:    true,
-			wantErr: false,
+			want:                  true,
+			wantNeedsUpdateReason: services.LaunchTemplateNeedsUpdateReasonCapacityReservationID,
+			wantErr:               false,
 		},
 		{
 			name: "Should return true if one has capacity reservation ID and other doesn't",
@@ -909,8 +992,9 @@ func TestServiceLaunchTemplateNeedsUpdate(t *testing.T) {
 				},
 				CapacityReservationID: nil,
 			},
-			want:    true,
-			wantErr: false,
+			want:                  true,
+			wantNeedsUpdateReason: services.LaunchTemplateNeedsUpdateReasonCapacityReservationID,
+			wantErr:               false,
 		},
 	}
 	for _, tt := range tests {
@@ -948,12 +1032,13 @@ func TestServiceLaunchTemplateNeedsUpdate(t *testing.T) {
 				tt.expect(mockEC2Client.EXPECT())
 			}
 
-			got, err := s.LaunchTemplateNeedsUpdate(machinePoolScope, tt.incoming, tt.existing)
+			got, gotNeedsUpdateReason, err := s.LaunchTemplateNeedsUpdate(machinePoolScope, tt.incoming, tt.existing)
 			if tt.wantErr {
 				g.Expect(err).To(HaveOccurred())
 				return
 			}
 			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(gotNeedsUpdateReason).Should(Equal(tt.wantNeedsUpdateReason))
 			g.Expect(got).Should(Equal(tt.want))
 		})
 	}
@@ -2028,7 +2113,7 @@ func TestDiscoverLaunchTemplateAMI(t *testing.T) {
 				tc.expect(ec2Mock.EXPECT())
 			}
 
-			s := NewService(cs)
+			s := NewService(cs).WithInstanceTypeArchitectureCache(nil)
 			s.EC2Client = ec2Mock
 
 			id, err := s.DiscoverLaunchTemplateAMI(context.TODO(), ms)
@@ -2104,7 +2189,7 @@ func TestDiscoverLaunchTemplateAMIForEKS(t *testing.T) {
 				tc.expectSSM(ssmMock.EXPECT())
 			}
 
-			s := NewService(mcps)
+			s := NewService(mcps).WithInstanceTypeArchitectureCache(nil)
 			s.EC2Client = ec2Mock
 			s.SSMClient = ssmMock
 

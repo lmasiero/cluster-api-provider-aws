@@ -67,6 +67,7 @@ const (
 	IgnitionFlavor                       = "ignition"
 	StorageClassOutTreeZoneLabel         = "topology.ebs.csi.aws.com/zone"
 	GPUFlavor                            = "gpu"
+	NitroEnclaveFlavor                   = "nitro-enclave"
 	InstanceVcpu                         = "AWS_MACHINE_TYPE_VCPU_USAGE"
 	EFSSupport                           = "efs-support"
 	IntreeCloudProvider                  = "intree-cloud-provider"
@@ -77,8 +78,6 @@ const (
 
 	ClassicElbTestKubernetesFrom = "CLASSICELB_TEST_KUBERNETES_VERSION_FROM"
 	ClassicElbTestKubernetesTo   = "CLASSICELB_TEST_KUBERNETES_VERSION_TO"
-
-	DedicatedHostFlavor = "dedicated-host"
 )
 
 // ResourceQuotaFilePath is the path to the file that contains the resource usage.

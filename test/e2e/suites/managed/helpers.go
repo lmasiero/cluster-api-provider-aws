@@ -56,6 +56,8 @@ const (
 	EKSAuthAPIAndConfigMapFlavor                      = "eks-auth-api-and-config-map"
 	EKSAuthBootstrapDisabledFlavor                    = "eks-auth-bootstrap-disabled"
 	EKSControlPlaneOnlyWithAccessEntriesFlavor        = "eks-control-plane-only-with-accessentries"
+	EKSNodeadmClusterClassFlavor                      = "eks-nodeadm-clusterclass"
+	EKSNitroEnclaveManagedMachinePoolFlavor           = "eks-nitro-enclave-managedmachinepool"
 )
 
 const (

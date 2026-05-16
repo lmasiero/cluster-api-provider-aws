@@ -46,6 +46,8 @@ import (
 
 	rosacontrolplanev1 "sigs.k8s.io/cluster-api-provider-aws/v2/controlplane/rosa/api/v1beta2"
 	expinfrav1 "sigs.k8s.io/cluster-api-provider-aws/v2/exp/api/v1beta2"
+	"sigs.k8s.io/cluster-api-provider-aws/v2/pkg/cloud/scope"
+	"sigs.k8s.io/cluster-api-provider-aws/v2/pkg/rosa"
 	v1beta1conditions "sigs.k8s.io/cluster-api/util/deprecated/v1beta1/conditions"
 )
 
@@ -366,35 +368,34 @@ func TestROSARoleConfigReconcileCreate(t *testing.T) {
 		Client:  testEnv.Client,
 		Runtime: r,
 	}
-
-	// Call the Reconcile function
 	req := ctrl.Request{}
 	req.NamespacedName = types.NamespacedName{Name: rosaRoleConfig.Name, Namespace: rosaRoleConfig.Namespace}
-	_, errReconcile := reconciler.Reconcile(ctx, req)
 
-	// Assertions - expect the installer role empty error since AccountRolesRef is not populated yet
-	g.Expect(errReconcile).ToNot(HaveOccurred())
+	g.Eventually(func(g Gomega) {
+		// Call the Reconcile function
+		_, errReconcile := reconciler.Reconcile(ctx, req)
 
-	// Sleep to ensure the status is updated
-	time.Sleep(100 * time.Millisecond)
+		// Assertions - expect the installer role empty error since AccountRolesRef is not populated yet
+		g.Expect(errReconcile).ToNot(HaveOccurred())
 
-	// Check the status of the ROSARoleConfig resource
-	updatedRoleConfig := &expinfrav1.ROSARoleConfig{}
-	err = reconciler.Client.Get(ctx, req.NamespacedName, updatedRoleConfig)
-	g.Expect(err).ToNot(HaveOccurred())
+		// Check the status of the ROSARoleConfig resource
+		updatedRoleConfig := &expinfrav1.ROSARoleConfig{}
+		err = reconciler.Client.Get(ctx, req.NamespacedName, updatedRoleConfig)
+		g.Expect(err).ToNot(HaveOccurred())
 
-	// We expect only oidcID to be set with first reconcile happen, Account roles and Operator roles should be empty
-	g.Expect(updatedRoleConfig.Status.OIDCID).To(Equal("test-oidc-id-created"))
-	g.Expect(updatedRoleConfig.Status.AccountRolesRef).To(Equal(expinfrav1.AccountRolesRef{}))
-	g.Expect(updatedRoleConfig.Status.OperatorRolesRef).To(Equal(rosacontrolplanev1.AWSRolesRef{}))
+		// We expect only oidcID to be set with first reconcile happen, Account roles and Operator roles should be empty
+		g.Expect(updatedRoleConfig.Status.OIDCID).To(Equal("test-oidc-id-created"))
+		g.Expect(updatedRoleConfig.Status.AccountRolesRef).To(Equal(expinfrav1.AccountRolesRef{}))
+		g.Expect(updatedRoleConfig.Status.OperatorRolesRef).To(Equal(rosacontrolplanev1.AWSRolesRef{}))
 
-	// Ready condition should be false.
-	for _, condition := range updatedRoleConfig.Status.Conditions {
-		if condition.Type == expinfrav1.RosaRoleConfigReadyCondition {
-			g.Expect(condition.Status).To(Equal(corev1.ConditionFalse))
-			break
+		// Ready condition should be false.
+		for _, condition := range updatedRoleConfig.Status.Conditions {
+			if condition.Type == expinfrav1.RosaRoleConfigReadyCondition {
+				g.Expect(condition.Status).To(Equal(corev1.ConditionFalse))
+				break
+			}
 		}
-	}
+	}).WithTimeout(30 * time.Second).Should(Succeed())
 }
 
 func TestROSARoleConfigReconcileExist(t *testing.T) {
@@ -557,12 +558,12 @@ func TestROSARoleConfigReconcileExist(t *testing.T) {
 	)
 
 	// Create CRs with unique names to avoid conflicts
-	ns, err := testEnv.CreateNamespace(ctx, fmt.Sprintf("test-namespace-all-existing-%s", testID))
+	ns, err := testEnv.CreateNamespace(ctx, fmt.Sprintf("test-namespace-existing-%s", testID))
 	g.Expect(err).ToNot(HaveOccurred())
 
 	rosaRoleConfig := &expinfrav1.ROSARoleConfig{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:       fmt.Sprintf("test-rosa-role-all-existing-%s", testID),
+			Name:       fmt.Sprintf("test-rosarole-existing-%s", testID),
 			Namespace:  ns.Name,
 			Finalizers: []string{expinfrav1.RosaRoleConfigFinalizer},
 		},
@@ -590,19 +591,18 @@ func TestROSARoleConfigReconcileExist(t *testing.T) {
 		Runtime: r,
 	}
 
-	// Call the Reconcile function
 	req := ctrl.Request{}
 	req.NamespacedName = types.NamespacedName{Name: rosaRoleConfig.Name, Namespace: rosaRoleConfig.Namespace}
-	_, errReconcile := reconciler.Reconcile(ctx, req)
-
-	// Assertions - since all resources exist, reconciliation should succeed
-	g.Expect(errReconcile).ToNot(HaveOccurred())
-
-	var updatedRoleConfig *expinfrav1.ROSARoleConfig
 
 	g.Eventually(func(g Gomega) {
+		// Call the Reconcile function
+		_, errReconcile := reconciler.Reconcile(ctx, req)
+
+		// Assertions - since all resources exist, reconciliation should succeed
+		g.Expect(errReconcile).ToNot(HaveOccurred())
+
 		// Check the status of the ROSARoleConfig resource
-		updatedRoleConfig = &expinfrav1.ROSARoleConfig{}
+		updatedRoleConfig := &expinfrav1.ROSARoleConfig{}
 		g.Expect(reconciler.Client.Get(ctx, req.NamespacedName, updatedRoleConfig)).ToNot(HaveOccurred())
 
 		// Verify that all existing account roles are preserved
@@ -623,15 +623,209 @@ func TestROSARoleConfigReconcileExist(t *testing.T) {
 		g.Expect(updatedRoleConfig.Status.OperatorRolesRef.NodePoolManagementARN).To(Equal("arn:aws:iam::123456789012:role/test-kube-system-capa-controller-manager"))
 		g.Expect(updatedRoleConfig.Status.OperatorRolesRef.ControlPlaneOperatorARN).To(Equal("arn:aws:iam::123456789012:role/test-kube-system-control-plane-operator"))
 		g.Expect(updatedRoleConfig.Status.OperatorRolesRef.KMSProviderARN).To(Equal("arn:aws:iam::123456789012:role/test-kube-system-kms-provider"))
-	}).WithTimeout(30 * time.Second).Should(Succeed())
 
-	// Should have a condition indicating success - expect Ready condition to be True
-	g.Eventually(func(g Gomega) {
+		// Should have a condition indicating success - expect Ready condition to be True
 		readyCondition := v1beta1conditions.Get(updatedRoleConfig, expinfrav1.RosaRoleConfigReadyCondition)
 		g.Expect(readyCondition).ToNot(BeNil())
 		g.Expect(readyCondition.Status).To(Equal(corev1.ConditionTrue))
 		g.Expect(readyCondition.Reason).To(Equal(expinfrav1.RosaRoleConfigCreatedReason))
-	}).Should(Succeed())
+	}).WithTimeout(30 * time.Second).WithPolling(500 * time.Millisecond).Should(Succeed())
+}
+
+func TestROSARoleConfigSetUpRuntimeWithExpiredAWSCredentials(t *testing.T) {
+	RegisterTestingT(t)
+	g := NewWithT(t)
+	ctx := context.TODO()
+
+	// Mock empty AWS credentials
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	t.Setenv("AWS_SESSION_TOKEN", "")
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "/dev/null")
+	t.Setenv("AWS_CONFIG_FILE", "/dev/null")
+
+	// Create a miniaml scope for testing
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: fmt.Sprintf("test-ns-%s", generateTestID()),
+		},
+	}
+	createObject(g, ns, "")
+	defer cleanupObject(g, ns)
+
+	rosaRoleConfig := &expinfrav1.ROSARoleConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-role-config",
+			Namespace: ns.Namespace,
+		},
+		Spec: expinfrav1.ROSARoleConfigSpec{
+			AccountRoleConfig: expinfrav1.AccountRoleConfig{
+				Prefix:  "test",
+				Version: "4.15.0",
+			},
+			OperatorRoleConfig: expinfrav1.OperatorRoleConfig{
+				Prefix: "test",
+			},
+			OidcProviderType: expinfrav1.Managed,
+		},
+	}
+	createObject(g, rosaRoleConfig, ns.Name)
+	defer cleanupObject(g, rosaRoleConfig)
+
+	scope, err := scope.NewRosaRoleConfigScope(scope.RosaRoleConfigScopeParams{
+		Client:         testEnv.Client,
+		RosaRoleConfig: rosaRoleConfig,
+		ControllerName: "rosaroleconfig",
+	})
+	g.Expect(err).ToNot(HaveOccurred())
+
+	ssoServer := ocmsdk.MakeTCPServer()
+	apiServer := ocmsdk.MakeTCPServer()
+	defer ssoServer.Close()
+	defer apiServer.Close()
+
+	accessToken := ocmsdk.MakeTokenString("Bearer", 15*time.Minute)
+	ssoServer.AppendHandlers(ocmsdk.RespondWithAccessToken(accessToken))
+
+	logger, err := ocmlogging.NewGoLoggerBuilder().Debug(false).Build()
+	Expect(err).ToNot(HaveOccurred())
+	connection, err := sdk.NewConnectionBuilder().
+		Logger(logger).
+		Tokens(accessToken).
+		URL(apiServer.URL()).
+		Build()
+	Expect(err).To(BeNil())
+
+	ocmClient := ocm.NewClientWithConnection(connection)
+
+	// Track NewOCMClient call count to verify retry behavior
+	ocmClientCallCount := 0
+
+	reconciler := &ROSARoleConfigReconciler{
+		Client: testEnv.Client,
+		NewOCMClient: func(ctx context.Context, scope rosa.OCMSecretsRetriever) (rosa.OCMClient, error) {
+			ocmClientCallCount++
+			return ocmClient, nil
+		},
+		Runtime: nil, // Start with nil Runtime
+	}
+
+	// ==================== FIRST RECONCILIATION ====================
+	t.Log("First reconciliation: AWS credentials are missing/expired")
+
+	err = reconciler.setUpRuntime(ctx, scope)
+
+	g.Expect(err).To(HaveOccurred(),
+		"setUpRuntime should return error when AWS client creation fails")
+	g.Expect(err.Error()).To(ContainSubstring("failed to create aws client"),
+		"Error should indicate AWS client failure")
+
+	g.Expect(reconciler.Runtime).To(BeNil(),
+		"Runtime MUST be nil after failed initialization (atomic assignment fix)")
+
+	g.Expect(ocmClientCallCount).To(Equal(1),
+		"NewOCMClient should be called once on first attempt")
+
+	// ==================== SECOND RECONCILIATION ====================
+	t.Log("Second reconciliation: Retry with still-missing AWS credentials")
+
+	err = reconciler.setUpRuntime(ctx, scope)
+
+	g.Expect(err).To(HaveOccurred(),
+		"setUpRuntime should still fail with missing AWS credentials")
+
+	g.Expect(reconciler.Runtime).To(BeNil(),
+		"Runtime should still be nil after second failed attempt")
+
+	// NewOCMClient was called AGAIN (proves no early return)
+	g.Expect(ocmClientCallCount).To(Equal(2),
+		"NewOCMClient should be called twice - proves guard clause allows retry when Runtime is nil")
+}
+
+// TestSetUpRuntimeIdempotency verifies that setUpRuntime returns early
+// when Runtime is already fully initialized.
+func TestROSARoleConfigSetUpRuntimeIdempotency(t *testing.T) {
+	RegisterTestingT(t)
+	g := NewWithT(t)
+
+	ssoServer := ocmsdk.MakeTCPServer()
+	apiServer := ocmsdk.MakeTCPServer()
+	defer ssoServer.Close()
+	defer apiServer.Close()
+
+	accessToken := ocmsdk.MakeTokenString("Bearer", 15*time.Minute)
+	ssoServer.AppendHandlers(ocmsdk.RespondWithAccessToken(accessToken))
+
+	logger, err := ocmlogging.NewGoLoggerBuilder().Debug(false).Build()
+	Expect(err).ToNot(HaveOccurred())
+	connection, err := sdk.NewConnectionBuilder().
+		Logger(logger).
+		Tokens(accessToken).
+		URL(apiServer.URL()).
+		Build()
+	Expect(err).To(BeNil())
+
+	ocmClient := ocm.NewClientWithConnection(connection)
+
+	mockCtrl := gomock.NewController(t)
+	defer mockCtrl.Finish()
+
+	mockIamClient := rosaMocks.NewMockIamApiClient(mockCtrl)
+	mockSTSClient := rosaMocks.NewMockStsApiClient(mockCtrl)
+
+	awsClient := aws.New(
+		awsSdk.Config{},
+		aws.NewLoggerWrapper(logrus.New(), nil),
+		mockIamClient,
+		rosaMocks.NewMockEc2ApiClient(mockCtrl),
+		rosaMocks.NewMockOrganizationsApiClient(mockCtrl),
+		rosaMocks.NewMockS3ApiClient(mockCtrl),
+		rosaMocks.NewMockSecretsManagerApiClient(mockCtrl),
+		mockSTSClient,
+		rosaMocks.NewMockCloudFormationApiClient(mockCtrl),
+		rosaMocks.NewMockServiceQuotasApiClient(mockCtrl),
+		rosaMocks.NewMockServiceQuotasApiClient(mockCtrl),
+		&aws.AccessKey{},
+		false,
+	)
+
+	runtime := rosacli.NewRuntime()
+	runtime.OCMClient = ocmClient
+	runtime.AWSClient = awsClient
+	runtime.Creator = &aws.Creator{
+		ARN:       "arn:aws:iam:123456789012:user/test",
+		AccountID: "123456789012",
+		IsSTS:     false,
+	}
+
+	callCount := 0
+	reconciler := &ROSARoleConfigReconciler{
+		Runtime: runtime, // already initialized
+		NewOCMClient: func(ctx context.Context, scope rosa.OCMSecretsRetriever) (rosa.OCMClient, error) {
+			callCount++
+			return ocmClient, nil
+		},
+	}
+
+	scope := &scope.RosaRoleConfigScope{}
+
+	// Call setUpRuntime - should return early
+	err = reconciler.setUpRuntime(ctx, scope)
+	g.Expect(err).ToNot(HaveOccurred())
+
+	// Runtime should be unchanged (same instance)
+	g.Expect(reconciler.Runtime).To(BeIdenticalTo(runtime),
+		"Runtime should not be recreated when already initialized")
+
+	// NewOCMClient should NOT be called (early return)
+	g.Expect(callCount).To(Equal(0),
+		"NewOCMClient should not be called when Runtime already exists")
+
+	// Call again - should still return early
+	err = reconciler.setUpRuntime(ctx, scope)
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(callCount).To(Equal(0), "Still should not call NewOCMClient")
 }
 
 func TestROSARoleConfigReconcileDelete(t *testing.T) {
